@@ -1,12 +1,17 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Sha256 where
 
 import Data.Word
 import Data.Bits
+import Data.String (fromString)
 import Data.Map (Map,fromList)
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
+import Data.ByteString.Builder
 import Text.Printf
 
 data T8 = T8 Word32 Word32 Word32 Word32 Word32 Word32 Word32 Word32
@@ -310,6 +315,31 @@ toT64 (T16 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 v16) =
   0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
   0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 
+toWord32' :: [Word8] -> Word32
+toWord32' a@(_:_:_:_:[]) =
+  (v1 `shiftL` 24) .|.
+  (v2 `shiftL` 16) .|.
+  (v3 `shiftL` 8) .|.
+  v4
+  where
+    (v1:v2:v3:v4:[]) = map fromIntegral a
+toWord32' _ = 0
+
+toWord32 :: [Word8] -> [Word32]
+toWord32 [] = []
+toWord32 lst = toWord32' (take 4 lst) : toWord32 (drop 4 lst)
+
+toT16' :: [Word32] -> T16
+toT16' (v1:v2:v3:v4:v5:v6:v7:v8:v9:v10:v11:v12:v13:v14:v15:v16:[]) = T16 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 v16
+toT16' _ = undefined
+
+toT16 :: [Word32] -> [T16]
+toT16 [] = []
+toT16 lst = toT16' (take 16 lst) : toT16 (drop 16 lst)
+
+bToT16 :: BL.ByteString -> [T16]
+bToT16 str = toT16 $ toWord32 $ BL.unpack str
+
 sha256init :: T8
 sha256init =
   T8
@@ -379,3 +409,20 @@ sha256shuffle w16 = foldl (\ww i -> setV ww i (s1 (ww ! (i-2)) + (ww ! (i-7)) + 
 -- 936a185c,aaa266bb,9cbe981e,9e05cb78,cd732b0b,3280eb94,4412bb6f,8f8f07af
 sha256_do_chunk :: T8 -> T16 -> T8
 sha256_do_chunk h w16 = h <> (rotate8 h $ sha256shuffle w16)
+
+
+
+-- | sha256_do_chunk
+--
+-- >>> sha256 (fromString "helloworld")
+-- 936a185c,aaa266bb,9cbe981e,9e05cb78,cd732b0b,3280eb94,4412bb6f,8f8f07af
+-- >>> sha256 (fromString "helloworldhelloworldhelloworldhelloworldhelloworldhelloworldhelloworld")
+-- 34293617,f058aaa2,8972513f,ecbd06cd,9417c6d6,def8b614,518ccbf5,1183355b
+sha256 :: B.ByteString -> T8
+sha256 str =
+  let len = B.length str
+      n = (64 - ((len+9) `mod` 64)) `mod` 64
+      zeros = byteString (B.pack (replicate (fromIntegral n) (0 :: Word8))) :: Builder
+      tmp = byteString str <> word8 0x80 <> zeros <> word64BE (fromIntegral (len*8))
+      bstr = bToT16 $ toLazyByteString tmp
+  in foldl (\h w -> sha256_do_chunk h w) sha256init bstr

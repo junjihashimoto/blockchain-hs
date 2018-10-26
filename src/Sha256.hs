@@ -378,8 +378,4 @@ sha256shuffle w16 = foldl (\ww i -> setV ww i (s1 (ww ! (i-2)) + (ww ! (i-7)) + 
 -- >>> sha256_do_chunk sha256init sampleData
 -- 936a185c,aaa266bb,9cbe981e,9e05cb78,cd732b0b,3280eb94,4412bb6f,8f8f07af
 sha256_do_chunk :: T8 -> T16 -> T8
-sha256_do_chunk h w16 =
-  let w = toT64 w16
-      w' = foldl (\ww i -> setV ww i (s1 (ww ! (i-2)) + (ww ! (i-7)) + s0 (ww ! (i-15)) + (ww ! (i-16)))) w [16..63]
-      h' = rotate8 h w'
-  in h <> h'
+sha256_do_chunk h w16 = h <> (rotate8 h $ sha256shuffle w16)
